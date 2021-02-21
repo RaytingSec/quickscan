@@ -2,12 +2,13 @@
 
 import logging
 import argparse
-from scapy.all import sr1, IP, TCP
+# from scapy.all import sr, sr1, sndrcv, IP, TCP, conf
 import time
 import json
 from tabulate import tabulate
 from multiprocessing.pool import ThreadPool
 import random
+import socket
 
 
 FORMAT = "%(asctime)s : %(name)s : %(levelname)-8s : %(message)s"
@@ -16,6 +17,7 @@ logging.basicConfig(format=FORMAT)
 log = logging.getLogger('quickscan')
 
 
+socket.setdefaulttimeout(100 / 1000)  # Milliseconds to seconds
 TEST_RUN = True
 TCP_FLAGS_MAPPING = {
     'S': 'SYN',
@@ -27,7 +29,46 @@ TCP_FLAGS_MAPPING = {
     'E': 'ECE',
     'C': 'CWR',
 }
-THREAD_COUNT = 8
+CONFIG = {
+    'hide_closed': False,
+    'thread_count': 8
+}
+
+
+def _scan_target(host:str, port:int, protocol:str) -> dict:
+    """
+    Use python socket connections to try checking if port is open
+
+    TODO: would be nice to use the TCP response flags
+    """
+    target = f"{host}:{port}/{protocol}"
+    log.debug(f"Scanning {target}")
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    status = 'unknown'
+    is_open = False
+    flags_interpreted = 'na'
+
+    try:
+        s.connect((host, port))
+        s.close()
+        log.info(f"Open port found: {target}")
+        status = 'open'
+        is_open = True
+    except socket.timeout:
+        log.debug('timed out')
+        status = 'timeout'
+    except ConnectionRefusedError:
+        status = 'closed'
+    except Exception as e:
+        log.exception(f"Failed on {target}: {e}")
+
+    return {
+        'target': target,
+        'open': is_open,
+        'status': status,
+        'flags': flags_interpreted
+    }
 
 
 def _build_scan_targets(input_targets:list):
@@ -49,7 +90,7 @@ def _build_scan_targets(input_targets:list):
                 ...
             ]
 
-    TODO: interpret wildcars, port ranges, etc. into discrete targets
+    TODO: host ranges/cidr would be nice
     """
     built_targets = []
     for target in input_targets:
@@ -59,15 +100,15 @@ def _build_scan_targets(input_targets:list):
         port = target['port']
         protocol = target['protocol']
 
-        if type(port) is str:
-            if port == '*':
-                new_targets = [[host, port, protocol] for port in range(1, 2**16)]  # Ports 1-65535
-            elif '-' in port:
-                start, end = port.split('-')
-                start = int(start)
-                end = int(end)
-                new_targets = [[host, port, protocol] for port in range(start, end + 1)]  # Ports 1-65535
+        if port == '*':
+            new_targets = [[host, port, protocol] for port in range(1, 2**16)]  # Ports 1-65535
+        elif type(port) is str and '-' in port:
+            start, end = port.split('-')
+            start = int(start)
+            end = int(end)
+            new_targets = [[host, port, protocol] for port in range(start, end + 1)]
         else:
+            port = int(port)
             new_targets = [[host, port, protocol]]
 
         built_targets += new_targets
@@ -75,58 +116,21 @@ def _build_scan_targets(input_targets:list):
     return built_targets
 
 
-def _scan_target(host:str, port:int, protocol:str) -> dict:
-    """
-    Run scan on a particular combination
-    """
-    target = f"{host}:{port}/{protocol}"
-    log.debug(f"Scanning {target}")
-
-    # Do the scan
-    # TODO: set a timeout to make sure it scans fast even if no response
-    # TODO: randomized source port
-    sport = random.randrange(32768, 60999)
-    scan_response_packet = sr1(IP(dst=host) / TCP(sport=sport, dport=port, flags="S"), verbose=False)
-    # tcpRequest = IP(dst=ip)/TCP(dport=port,flags="S")
-    # tcpResponse = sr1(tcpRequest,timeout=1,verbose=0)
-    # log.debug(f"scan_response_packet: {scan_response_packet.summary()}")
-
-    # Interpret results
-    tcp = scan_response_packet.getlayer(TCP)
-    flags = tcp.flags
-    flags_interpreted = [TCP_FLAGS_MAPPING[flag] for flag in flags]
-    # log.debug(f"Flags: {flags_interpreted}")
-
-    # Naive interpretation of open port
-    status = 'unknown'
-    if flags.S:
-        status = 'open'
-    elif flags.R:
-        status = 'closed'
-    is_open = True if flags.S and flags.A else False
-    if is_open:
-        log.info(f"Open port found: {target}")
-
-    result = {
-        'target': target,
-        'open': is_open,
-        'status': status,
-        'flags': flags_interpreted,
-        'packet': scan_response_packet
-    }
-
-    return result
-
-
 def _submit_scan_job(targets:list):
     """
     Run a multithreaded scan across all targets specified
     """
-    pool = ThreadPool(processes=THREAD_COUNT)
+    # Attempt to randomize as a jury rigged method of scanning across multiple hosts at once
+    random.shuffle(targets)
+
+    pool = ThreadPool(processes=CONFIG['thread_count'])
     async_result = pool.starmap_async(_scan_target, targets)
     results = async_result.get()
 
-    return results
+    # Un-randomize results
+    sorted_results = sorted(results, key=lambda k: k['target'])
+
+    return sorted_results
 
 
 def parse_results():
@@ -142,8 +146,11 @@ def _print_table(results:list):
     headers = ['target', 'status', 'open', 'flags']
     table = []
     for entry_dict in results:
-        entry_list = [entry_dict[h] for h in headers]
+        if CONFIG['hide_closed'] and not entry_dict['open']:
+            continue
+        entry_list = [entry_dict.get(h, '') for h in headers]
         table.append(entry_list)
+
     print(tabulate(table, headers, tablefmt='pipe'))  # markdown table
 
 
@@ -166,7 +173,7 @@ def run_scan(targets:list, output_terminal:bool=True, output_text:bool=False, ou
     """
     log.debug(f"Provided {len(targets)} targets: {targets}")
     built_targets = _build_scan_targets(targets)
-    log.debug(f"Built into {len(built_targets)} targets: {built_targets}")
+    log.debug(f"Built into {len(built_targets)}")
 
     log.info(f"Starting scan on {len(built_targets)} targets")
     start = time.time()
@@ -184,6 +191,9 @@ def run_scan(targets:list, output_terminal:bool=True, output_text:bool=False, ou
         pass
     if output_csv:
         pass
+
+    open_targets = [None for result in results if result['open']]
+    log.info(f"{len(open_targets)} targets open")
 
     return results
 
@@ -220,8 +230,33 @@ def basic_test():
         'port': 443,
         'protocol': 'tcp'
     }
-    range_target = {
+    range_target_1 = {
         'host': '10.1.0.1',
+        'port': '1-1000',
+        'protocol': 'tcp'
+    }
+    range_target_2 = {
+        'host': '10.1.0.2',
+        'port': '1-1000',
+        'protocol': 'tcp'
+    }
+    range_target_3 = {
+        'host': '10.1.0.3',
+        'port': '1-1000',
+        'protocol': 'tcp'
+    }
+    range_target_4 = {
+        'host': '10.1.0.24',
+        'port': '1-1000',
+        'protocol': 'tcp'
+    }
+    range_target_5 = {
+        'host': '10.1.0.25',
+        'port': '1-1000',
+        'protocol': 'tcp'
+    }
+    range_target_6 = {
+        'host': '10.1.0.27',
         'port': '1-1000',
         'protocol': 'tcp'
     }
@@ -237,27 +272,63 @@ def basic_test():
     # targets.append(example_https)
     # targets.append(google_http)
     # targets.append(google_https)
-    targets.append(range_target)
+    targets.append(range_target_1)
+    targets.append(range_target_2)
+    targets.append(range_target_3)
+    targets.append(range_target_4)
+    targets.append(range_target_5)
+    # targets.append(range_target_6)
     # targets.append(wildcard_target)
 
+    # results = []
     results = run_scan(targets)
+
+    # # Test with sending directly with socket
+
+    # packets = []
+    # packets.append(_build_packet(known_open_local['host'], 51234, known_open_local['port']))
+    # packets.append(_build_packet(known_closed_local['host'], 51234, known_closed_local['port']))
+
+    # socket = conf.L3socket()
+    # response, other = sndrcv(socket, packets[0])
+    # socket.close()
+    # log.info(response)
+    # log.info(response[0][0])
+    # log.info(other)
+    # response = response[0][0]
+
+    # tcp = response.getlayer(TCP)
+    # flags = tcp.flags
+    # flags_interpreted = [TCP_FLAGS_MAPPING[flag] for flag in flags]
+    # log.info(flags_interpreted)
 
     return results
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    # Target
+    parser.add_argument('--target', '-t')
+    parser.add_argument('--port', '-p', help='Single port, range in start-end format, or * for all ports')
+    # Scan behavior
+    parser.add_argument('--threads', '-T', type=int, help='Number of threads to spawn for scanning')
+    # Output
+    parser.add_argument('--hide-closed', '-c', action='store_true', help='Hide closed targets in output')
     parser.add_argument('--debug', action='store_true', help='Set logging level to DEBUG')
     args = parser.parse_args()
 
     log.setLevel(logging.DEBUG) if args.debug else log.setLevel(logging.INFO)
+    CONFIG['hide_closed'] = args.hide_closed
+    CONFIG['thread_count'] = args.threads
+    TEST_RUN = False if args.target or args.port else True
 
     log.info('Starting')
 
     if TEST_RUN:
         results = basic_test()
     else:
-        # TODO: take in user input
-        pass
+        targets = [{'host': args.target, 'port': args.port, 'protocol': 'tcp'}]
+        log.debug(f"Running scan on {targets}")
+        run_scan(targets)
 
     log.info('Complete')

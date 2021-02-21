@@ -19,6 +19,8 @@ But with quickscan:
 
 When scanning local hosts, bandwidth and resources are almost never a bottleneck and I want results now rather than waiting 10, 20, or more seconds to see what nmap finds. There are also a few quirks with nmap such as the output format. What quickscan does is make it fast and simple. Try it out!
 
+For a comparison of performance, see respective section below.
+
 Getting Started
 ---------------
 
@@ -54,56 +56,87 @@ Getting Started
     pytest
     ```
 
-Output
+Sample Output
 -------------
 
-- Specific targets
+Scan targeting 10.1.0.1 on port 20-25:
 
-    ```
-    2021-02-20 21:30:50,964 : quickscan : INFO     : Starting
-    2021-02-20 21:30:50,964 : quickscan : INFO     : Starting scan on 6 targets
-    2021-02-20 21:30:51,010 : quickscan : INFO     : Open port found: 10.1.0.1:22/tcp
-    2021-02-20 21:30:51,093 : quickscan : INFO     : Open port found: 93.184.216.34:80/tcp
-    2021-02-20 21:30:51,135 : quickscan : INFO     : Open port found: 93.184.216.34:443/tcp
-    2021-02-20 21:30:51,174 : quickscan : INFO     : Open port found: 142.250.72.206:80/tcp
-    2021-02-20 21:30:51,221 : quickscan : INFO     : Open port found: 142.250.72.206:443/tcp
-    2021-02-20 21:30:51,222 : quickscan : INFO     : Scan time: 0.25766 seconds
-    | target                 | status   | open   | flags          |
-    |:-----------------------|:---------|:-------|:---------------|
-    | 10.1.0.1:22/tcp        | open     | True   | ['SYN', 'ACK'] |
-    | 10.1.0.1:123/tcp       | closed   | False  | ['RST', 'ACK'] |
-    | 93.184.216.34:80/tcp   | open     | True   | ['SYN', 'ACK'] |
-    | 93.184.216.34:443/tcp  | open     | True   | ['SYN', 'ACK'] |
-    | 142.250.72.206:80/tcp  | open     | True   | ['SYN', 'ACK'] |
-    | 142.250.72.206:443/tcp | open     | True   | ['SYN', 'ACK'] |
-    2021-02-20 21:30:51,222 : quickscan : INFO     : Complete
-    ```
+```
+2021-02-21 03:40:31,092 : quickscan : INFO     : Starting
+2021-02-21 03:40:31,092 : quickscan : DEBUG    : Provided 1 targets: [{'host': '10.1.0.1', 'port': '20-25', 'protocol': 'tcp'}]
+2021-02-21 03:40:31,092 : quickscan : DEBUG    : Built into 6
+2021-02-21 03:40:31,092 : quickscan : INFO     : Starting scan on 6 targets
+2021-02-21 03:40:31,096 : quickscan : DEBUG    : Scanning 10.1.0.1:21/tcp
+2021-02-21 03:40:31,096 : quickscan : DEBUG    : Scanning 10.1.0.1:20/tcp
+2021-02-21 03:40:31,096 : quickscan : DEBUG    : Scanning 10.1.0.1:22/tcp
+2021-02-21 03:40:31,096 : quickscan : DEBUG    : Scanning 10.1.0.1:24/tcp
+2021-02-21 03:40:31,096 : quickscan : DEBUG    : Scanning 10.1.0.1:25/tcp
+2021-02-21 03:40:31,097 : quickscan : DEBUG    : Scanning 10.1.0.1:23/tcp
+2021-02-21 03:40:31,097 : quickscan : INFO     : Open port found: 10.1.0.1:22/tcp
+2021-02-21 03:40:31,098 : quickscan : INFO     : Scan time: 0.00571 seconds
+| target          | status   | open   | flags   |
+|:----------------|:---------|:-------|:--------|
+| 10.1.0.1:20/tcp | closed   | False  | na      |
+| 10.1.0.1:21/tcp | closed   | False  | na      |
+| 10.1.0.1:22/tcp | open     | True   | na      |
+| 10.1.0.1:23/tcp | closed   | False  | na      |
+| 10.1.0.1:24/tcp | closed   | False  | na      |
+| 10.1.0.1:25/tcp | closed   | False  | na      |
+2021-02-21 03:40:31,099 : quickscan : INFO     : 1 targets open
+2021-02-21 03:40:31,099 : quickscan : INFO     : Complete
+```
 
-- Wildcards and ranges against single host
+Note that with scapy removed due to performance reasons, TCP response flags are not available.
 
-    ```
-    2021-02-21 00:38:21,086 : quickscan : INFO     : Starting
-    2021-02-21 00:38:21,088 : quickscan : INFO     : Starting scan on 1000 targets
-    2021-02-21 00:38:21,584 : quickscan : INFO     : Open port found: 10.1.0.1:80/tcp
-    2021-02-21 00:38:21,709 : quickscan : INFO     : Open port found: 10.1.0.1:53/tcp
-    2021-02-21 00:38:21,759 : quickscan : INFO     : Open port found: 10.1.0.1:22/tcp
-    2021-02-21 00:38:22,864 : quickscan : INFO     : Open port found: 10.1.0.1:443/tcp
-    2021-02-21 00:38:25,255 : quickscan : INFO     : Scan time: 4.16694 seconds
-    | target            | status   | open   | flags          |
-    |:------------------|:---------|:-------|:---------------|
-    | 10.1.0.1:1/tcp    | closed   | False  | ['RST', 'ACK'] |
-    | 10.1.0.1:2/tcp    | closed   | False  | ['RST', 'ACK'] |
-    | 10.1.0.1:3/tcp    | closed   | False  | ['RST', 'ACK'] |
-    ...
-    ```
 
-    + A full wildcard scan took a while according to `time`. Note that `nmap` took about 3.5 seconds, so we have a lot of improvement to do.
+Performance
+-----------
+
+- When scanning single host for all ports, this tool is slightly slower than nmap.
+
+    + nmap
+
+        ```
+        real    0m3.660s
+        user    0m0.661s
+        sys     0m2.608s
+        ```
+
+    + quickscan
+
+        ```
+        real    0m5.831s
+        user    0m4.143s
+        sys     0m4.283s
+        ```
+
+    + old quickscan with scapy, saved for reference
 
         ```
         real    4m21.175s
         user    3m21.011s
         sys     0m33.817s
         ```
+
+- Results start to get interesting when scanning across multiple hosts. Scanning three hosts for first 10,000 ports:
+
+    + nmap
+
+        ```
+        real    0m13.885s
+        user    0m0.655s
+        sys     0m2.109s
+        ```
+
+    + quickscan
+
+
+        ```
+        real    0m12.532s
+        user    0m5.432s
+        sys     0m5.850s
+        ```
+
 
 Outstanding Items
 -----------------
