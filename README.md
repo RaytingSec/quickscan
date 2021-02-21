@@ -15,7 +15,7 @@ nmap is known, familiar, and reasonably fast.
 But with quickscan:
 
 - Made to run scans very fast! Especially useful in local environments where noise is not a concern (if you're trying to be covert, you really shouldn't be active scanning in the first place)
-- variety of useful output formats for reports and interpreting for your own automation! (json, csv, markdown tables)
+- Variety of output formats useful for reports and interpreting for your own automation! (json, csv, markdown tables)
 
 When scanning local hosts, bandwidth and resources are almost never a bottleneck and I want results now rather than waiting 10, 20, or more seconds to see what nmap finds. There are also a few quirks with nmap such as the output format. What quickscan does is make it fast and simple. Try it out!
 
@@ -26,6 +26,7 @@ Getting Started
 
     ```bash
     git clone https://github.com/RaytingSec/quickscan.git
+    cd quickscan
     virtualenv .venv
     pip install -r requirements
     ```
@@ -44,7 +45,7 @@ Getting Started
 - Running:
 
     ```bash
-    python quickscan.py {parameters}
+    python src/quickscan.py {parameters}
     ```
 
 - Tests:
@@ -57,6 +58,14 @@ Sample Output
 -------------
 
 ```
+2021-02-20 21:30:50,964 : quickscan : INFO     : Starting
+2021-02-20 21:30:50,964 : quickscan : INFO     : Starting scan on 6 targets
+2021-02-20 21:30:51,010 : quickscan : INFO     : Open port found: 10.1.0.1:22/tcp
+2021-02-20 21:30:51,093 : quickscan : INFO     : Open port found: 93.184.216.34:80/tcp
+2021-02-20 21:30:51,135 : quickscan : INFO     : Open port found: 93.184.216.34:443/tcp
+2021-02-20 21:30:51,174 : quickscan : INFO     : Open port found: 142.250.72.206:80/tcp
+2021-02-20 21:30:51,221 : quickscan : INFO     : Open port found: 142.250.72.206:443/tcp
+2021-02-20 21:30:51,222 : quickscan : INFO     : Scan time: 0.25766 seconds
 | target                 | status   | open   | flags          |
 |:-----------------------|:---------|:-------|:---------------|
 | 10.1.0.1:22/tcp        | open     | True   | ['SYN', 'ACK'] |
@@ -65,16 +74,8 @@ Sample Output
 | 93.184.216.34:443/tcp  | open     | True   | ['SYN', 'ACK'] |
 | 142.250.72.206:80/tcp  | open     | True   | ['SYN', 'ACK'] |
 | 142.250.72.206:443/tcp | open     | True   | ['SYN', 'ACK'] |
+2021-02-20 21:30:51,222 : quickscan : INFO     : Complete
 ```
-
-| target                 | status   | open   | flags          |
-|:-----------------------|:---------|:-------|:---------------|
-| 10.1.0.1:22/tcp        | open     | True   | ['SYN', 'ACK'] |
-| 10.1.0.1:123/tcp       | closed   | False  | ['RST', 'ACK'] |
-| 93.184.216.34:80/tcp   | open     | True   | ['SYN', 'ACK'] |
-| 93.184.216.34:443/tcp  | open     | True   | ['SYN', 'ACK'] |
-| 142.250.72.206:80/tcp  | open     | True   | ['SYN', 'ACK'] |
-| 142.250.72.206:443/tcp | open     | True   | ['SYN', 'ACK'] |
 
 Outstanding Items
 -----------------
