@@ -1,4 +1,9 @@
 import quickscan
+import logging
+
+
+log = logging.getLogger('quickscan')
+log.setLevel(logging.DEBUG)
 
 
 # Sample targets
@@ -57,3 +62,43 @@ def test_scan_results():
     assert results[1]['open']
     assert results[2]['status'] == 'closed'
     assert not results[2]['open']
+
+
+def test_build_scan_targets_wildcard():
+    target_list = [{'host': '10.1.0.2', 'port': '*', 'protocol': 'tcp'}]
+    targets = quickscan._build_scan_targets(target_list)
+    assert targets
+
+    hosts = []
+    ports = []
+    protocols = []
+    for target in targets:
+        hosts.append(target[0])
+        ports.append(target[1])
+        protocols.append(target[2])
+
+    assert '10.1.0.2' in hosts
+    assert 1 in ports
+    assert 65535 in ports
+    assert 'tcp' in protocols
+    assert len(targets) == 65535
+
+
+def test_build_scan_targets_range():
+    target_list = [{'host': '10.1.0.2', 'port': '1-1000', 'protocol': 'tcp'}]
+    targets = quickscan._build_scan_targets(target_list)
+    assert targets
+
+    hosts = []
+    ports = []
+    protocols = []
+    for target in targets:
+        hosts.append(target[0])
+        ports.append(target[1])
+        protocols.append(target[2])
+
+    assert '10.1.0.2' in hosts
+    assert 1 in ports
+    assert 1000 in ports
+    assert 'tcp' in protocols
+    assert len(targets) == 1000

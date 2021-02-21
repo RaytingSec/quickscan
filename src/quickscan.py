@@ -6,6 +6,8 @@ from scapy.all import sr1, IP, TCP
 import time
 import json
 from tabulate import tabulate
+from multiprocessing.pool import ThreadPool
+import random
 
 
 FORMAT = "%(asctime)s : %(name)s : %(levelname)-8s : %(message)s"
@@ -14,10 +16,8 @@ logging.basicConfig(format=FORMAT)
 log = logging.getLogger('quickscan')
 
 
-# Run test scan
-TESTING = True
-# TCP flag mappings
-TCP_FLAGS = {
+TEST_RUN = True
+TCP_FLAGS_MAPPING = {
     'S': 'SYN',
     'A': 'ACK',
     'F': 'FIN',
@@ -27,6 +27,52 @@ TCP_FLAGS = {
     'E': 'ECE',
     'C': 'CWR',
 }
+THREAD_COUNT = 8
+
+
+def _build_scan_targets(input_targets:list):
+    """
+    Given some information of hosts, ports, other information, turn that into a list we can use to run scans with
+
+    Examples:
+        Input target:
+            [
+                {'host': '10.1.0.1', 'port': 22, 'protocol': 'tcp'},
+                {'host': '10.1.0.2', 'port': '*', 'protocol': 'tcp'}
+            ]
+        Resulting target:
+            [
+                ['10.1.0.1', 22, 'tcp'],
+                ['10.1.0.2', 1, 'tcp'],
+                ['10.1.0.2', 2, 'tcp'],
+                ['10.1.0.2', 3, 'tcp'],
+                ...
+            ]
+
+    TODO: interpret wildcars, port ranges, etc. into discrete targets
+    """
+    built_targets = []
+    for target in input_targets:
+        new_targets = []
+
+        host = target['host']
+        port = target['port']
+        protocol = target['protocol']
+
+        if type(port) is str:
+            if port == '*':
+                new_targets = [[host, port, protocol] for port in range(1, 2**16)]  # Ports 1-65535
+            elif '-' in port:
+                start, end = port.split('-')
+                start = int(start)
+                end = int(end)
+                new_targets = [[host, port, protocol] for port in range(start, end + 1)]  # Ports 1-65535
+        else:
+            new_targets = [[host, port, protocol]]
+
+        built_targets += new_targets
+
+    return built_targets
 
 
 def _scan_target(host:str, port:int, protocol:str) -> dict:
@@ -39,7 +85,7 @@ def _scan_target(host:str, port:int, protocol:str) -> dict:
     # Do the scan
     # TODO: set a timeout to make sure it scans fast even if no response
     # TODO: randomized source port
-    sport = 51234
+    sport = random.randrange(32768, 60999)
     scan_response_packet = sr1(IP(dst=host) / TCP(sport=sport, dport=port, flags="S"), verbose=False)
     # tcpRequest = IP(dst=ip)/TCP(dport=port,flags="S")
     # tcpResponse = sr1(tcpRequest,timeout=1,verbose=0)
@@ -48,8 +94,8 @@ def _scan_target(host:str, port:int, protocol:str) -> dict:
     # Interpret results
     tcp = scan_response_packet.getlayer(TCP)
     flags = tcp.flags
-    flags_interpreted = [TCP_FLAGS[flag] for flag in flags]
-    log.debug(f"Flags: {flags_interpreted}")
+    flags_interpreted = [TCP_FLAGS_MAPPING[flag] for flag in flags]
+    # log.debug(f"Flags: {flags_interpreted}")
 
     # Naive interpretation of open port
     status = 'unknown'
@@ -72,28 +118,13 @@ def _scan_target(host:str, port:int, protocol:str) -> dict:
     return result
 
 
-def _build_scan_targets():
-    """
-    Given some information of hosts, ports, other information, turn that into a list we can use to run scans with
-
-    TODO: interpret wildcars, port ranges, etc. into discrete targets
-    """
-    pass
-
-
 def _submit_scan_job(targets:list):
     """
     Run a multithreaded scan across all targets specified
     """
-    # TODO: non-multithreaded for now
-    results = []
-    for target in targets:
-        host = target['host']
-        port = target['port']
-        protocol = target['protocol']
-        result = _scan_target(host, port, protocol)
-        # result = _interpret_packet(scan_packet)
-        results.append(result)
+    pool = ThreadPool(processes=THREAD_COUNT)
+    async_result = pool.starmap_async(_scan_target, targets)
+    results = async_result.get()
 
     return results
 
@@ -133,20 +164,18 @@ def run_scan(targets:list, output_terminal:bool=True, output_text:bool=False, ou
     """
     Do the thing
     """
-    log.debug(f"Provided targets {len(targets)}")
-    _build_scan_targets()
-    log.debug(f"Built into {len(targets)} targets")
+    log.debug(f"Provided {len(targets)} targets: {targets}")
+    built_targets = _build_scan_targets(targets)
+    log.debug(f"Built into {len(built_targets)} targets: {built_targets}")
 
-    log.info(f"Starting scan on {len(targets)} targets")
+    log.info(f"Starting scan on {len(built_targets)} targets")
     start = time.time()
-    results = _submit_scan_job(targets)
+    results = _submit_scan_job(built_targets)
     end = time.time()
 
     elapsed = end - start
     log.info(f"Scan time: {elapsed:.5f} seconds")
 
-    # TODO: replace with table format
-    # print(json.dumps(results, indent=4))
     _print_table(results)
 
     if output_text:
@@ -168,7 +197,7 @@ def basic_test():
     }
     known_closed_local = {
         'host': '10.1.0.1',
-        'port': 123,
+        'port': 12345,
         'protocol': 'tcp'
     }
     example_http = {  # example.com
@@ -191,13 +220,25 @@ def basic_test():
         'port': 443,
         'protocol': 'tcp'
     }
+    range_target = {
+        'host': '10.1.0.1',
+        'port': '1-1000',
+        'protocol': 'tcp'
+    }
+    wildcard_target = {
+        'host': '10.1.0.1',
+        'port': '*',
+        'protocol': 'tcp'
+    }
 
-    targets.append(known_open_local)
-    targets.append(known_closed_local)
-    targets.append(example_http)
-    targets.append(example_https)
-    targets.append(google_http)
-    targets.append(google_https)
+    # targets.append(known_open_local)
+    # targets.append(known_closed_local)
+    # targets.append(example_http)
+    # targets.append(example_https)
+    # targets.append(google_http)
+    # targets.append(google_https)
+    targets.append(range_target)
+    # targets.append(wildcard_target)
 
     results = run_scan(targets)
 
@@ -207,14 +248,13 @@ def basic_test():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--debug', action='store_true', help='Set logging level to DEBUG')
-    # parser.add_argument('--dry-run', '-n', action='store_true', help='Run without moving anything, just identify files')
     args = parser.parse_args()
 
     log.setLevel(logging.DEBUG) if args.debug else log.setLevel(logging.INFO)
 
     log.info('Starting')
 
-    if TESTING:
+    if TEST_RUN:
         results = basic_test()
     else:
         # TODO: take in user input
